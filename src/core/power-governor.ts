@@ -1,4 +1,4 @@
-import { appendFile, mkdir, readFile, writeFile } from "node:fs/promises";
+import { appendFile, mkdir, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 
 export type Mode = "Idle" | "Commit" | "Converge" | "Shutdown";
@@ -74,6 +74,9 @@ const SESSION_FILE = "session.json";
 const EVENTS_FILE = "events.jsonl";
 const PARKING_FILE = "parking-lot.jsonl";
 const SHUTDOWN_FILE = "shutdown.md";
+const TODAY_FILE = "today.md";
+const LOCK_FILE = "session.lock";
+const STALE_LOCK_MS = 60_000;
 
 function buildSessionId(now: Date) {
   return `session_${now.toISOString().replaceAll(/[:.-]/g, "")}`;
@@ -123,7 +126,41 @@ async function saveSessionState(workspace: string, sessionState: SessionState) {
   );
 }
 
-function nextEvent(session: SessionState, now: Date, eventType: string, toolOrigin: string, fromMode: Mode, toMode: Mode, reason: string): EventRecord {
+function renderTodaySummary(sessionState: SessionState) {
+  return [
+    "# Today",
+    "",
+    `Mission: ${sessionState.mission}`,
+    `Mode: ${sessionState.mode}`,
+    `Timebox: ${sessionState.timeboxMinutes} minutes`,
+    "",
+    "## Approved Tasks",
+    ...sessionState.approvedTasks.map((task, index) => {
+      const status = sessionState.taskStatuses[index] ?? "pending";
+      const marker = status === "completed" ? "x" : status === "dropped" ? "-" : " ";
+      return `- [${marker}] ${task}`;
+    }),
+    "",
+  ].join("\n");
+}
+
+async function updateTodaySummary(workspace: string, sessionState: SessionState) {
+  await writeFile(
+    join(workspace, STATE_DIR, TODAY_FILE),
+    renderTodaySummary(sessionState),
+    "utf8",
+  );
+}
+
+function nextEvent(
+  session: SessionState,
+  now: Date,
+  eventType: string,
+  toolOrigin: string,
+  fromMode: Mode,
+  toMode: Mode,
+  reason: string,
+): EventRecord {
   return {
     eventId: buildEventId(session.sessionId, `${eventType}_${now.getTime()}`),
     sessionId: session.sessionId,
@@ -179,6 +216,7 @@ export async function startSession(input: StartSessionInput): Promise<SessionSta
   };
 
   await saveSessionState(input.workspace, sessionState);
+  await updateTodaySummary(input.workspace, sessionState);
 
   const eventRecord: EventRecord = {
     eventId: buildEventId(sessionId, "session_start"),
@@ -205,7 +243,7 @@ export async function recordOutOfScopeRequest(input: {
   const session = await getSessionState({ workspace: input.workspace });
 
   if (!session) {
-    throw new Error("No active session");
+    throw new PowerGovernorError("No active session", "no_active_session");
   }
 
   if (session.mode === "Converge") {
@@ -223,6 +261,7 @@ export async function recordOutOfScopeRequest(input: {
   session.lastUpdatedAt = input.now.toISOString();
 
   await saveSessionState(input.workspace, session);
+  await updateTodaySummary(input.workspace, session);
   await appendEvent(
     input.workspace,
     nextEvent(
@@ -272,6 +311,7 @@ export async function requestScopeOverride(input: {
   session.lastUpdatedAt = input.now.toISOString();
 
   await saveSessionState(input.workspace, session);
+  await updateTodaySummary(input.workspace, session);
   await appendEvent(
     input.workspace,
     nextEvent(
@@ -298,7 +338,7 @@ export async function parkIdea(input: {
   const session = await getSessionState({ workspace: input.workspace });
 
   if (!session) {
-    throw new Error("No active session");
+    throw new PowerGovernorError("No active session", "no_active_session");
   }
 
   const parkingEntry: ParkingEntry = {
@@ -313,6 +353,7 @@ export async function parkIdea(input: {
   session.lastUpdatedAt = input.now.toISOString();
 
   await saveSessionState(input.workspace, session);
+  await updateTodaySummary(input.workspace, session);
   await appendParkingEntry(input.workspace, parkingEntry);
   await appendEvent(
     input.workspace,
@@ -398,6 +439,7 @@ export async function requestTimeOverride(input: {
   session.expiresAt = new Date(input.now.getTime() + 15 * 60_000).toISOString();
 
   await saveSessionState(input.workspace, session);
+  await updateTodaySummary(input.workspace, session);
   await appendEvent(
     input.workspace,
     nextEvent(
@@ -478,6 +520,7 @@ export async function requestShutdown(input: {
   });
 
   await saveSessionState(input.workspace, session);
+  await updateTodaySummary(input.workspace, session);
   await writeFile(join(input.workspace, STATE_DIR, SHUTDOWN_FILE), output, "utf8");
   await appendEvent(
     input.workspace,
@@ -514,6 +557,7 @@ export async function confirmShutdown(input: {
   session.lastUpdatedAt = input.now.toISOString();
 
   await saveSessionState(input.workspace, session);
+  await updateTodaySummary(input.workspace, session);
   await appendEvent(
     input.workspace,
     nextEvent(
@@ -528,4 +572,23 @@ export async function confirmShutdown(input: {
   );
 
   return session;
+}
+
+export async function repairWorkspace(input: {
+  workspace: string;
+  now: Date;
+}): Promise<{ clearedStaleLock: boolean }> {
+  const lockPath = join(input.workspace, STATE_DIR, LOCK_FILE);
+  const lockStats = await stat(lockPath).catch(() => null);
+
+  if (!lockStats) {
+    return { clearedStaleLock: false };
+  }
+
+  if (input.now.getTime() - lockStats.mtime.getTime() > STALE_LOCK_MS) {
+    await rm(lockPath, { force: true });
+    return { clearedStaleLock: true };
+  }
+
+  return { clearedStaleLock: false };
 }
