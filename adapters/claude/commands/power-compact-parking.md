@@ -14,7 +14,7 @@ Then:
 After confirmation, run the local CLI with repeated `--entry` flags:
 
 ```bash
-power parking-compact --idea "<canonical idea>" --reason "<summary reason>"
+power parking-compact --entry "<entry id 1>" --entry "<entry id 2>" --idea "<canonical idea>" --reason "<summary reason>"
 ```
 
 After the command succeeds, show the new canonical parked entry id, idea, and the source entry ids that were compacted.
