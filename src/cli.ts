@@ -1,15 +1,19 @@
 #!/usr/bin/env node
 
 import {
+  compactParkingEntries,
   PowerGovernorError,
   confirmShutdown,
   expireTimebox,
+  getPromptContext,
   getSessionState,
   parkIdea,
+  reviewParkingEntries,
   recordOutOfScopeRequest,
   requestScopeOverride,
   requestShutdown,
   requestTimeOverride,
+  searchParkingEntries,
   startSession,
 } from "./core/power-governor.js";
 
@@ -115,6 +119,43 @@ async function main() {
       return;
     }
 
+    case "parking-review": {
+      const result = await reviewParkingEntries({ workspace });
+      printState(result, flags.has("json"));
+      return;
+    }
+
+    case "parking-search": {
+      const result = await searchParkingEntries({
+        workspace,
+        query: getRequiredFlag(flags, "query"),
+      });
+      printState(result, flags.has("json"));
+      return;
+    }
+
+    case "parking-compact": {
+      const result = await compactParkingEntries({
+        workspace,
+        toolOrigin,
+        now,
+        entryIds: getFlagList(flags, "entry"),
+        idea: getRequiredFlag(flags, "idea"),
+        reason: getRequiredFlag(flags, "reason"),
+      });
+      printState(result, flags.has("json"));
+      return;
+    }
+
+    case "prompt-context": {
+      const result = await getPromptContext({
+        workspace,
+        prompt: getRequiredFlag(flags, "prompt"),
+      });
+      printState(result, flags.has("json"));
+      return;
+    }
+
     case "out-of-scope": {
       const result = await recordOutOfScopeRequest({
         workspace,
@@ -193,7 +234,7 @@ async function main() {
 
     default:
       throw new Error(
-        "Unknown command. Supported commands: start, check, park, out-of-scope, scope-override, expire, time-override, shutdown, confirm-shutdown",
+        "Unknown command. Supported commands: start, check, park, parking-review, parking-search, parking-compact, prompt-context, out-of-scope, scope-override, expire, time-override, shutdown, confirm-shutdown",
       );
   }
 }
