@@ -24,6 +24,29 @@ afterEach(async () => {
 });
 
 describe("timebox enforcement", () => {
+  test("refuses a time override before the session has expired", async () => {
+    const workspace = await createWorkspace();
+
+    await startSession({
+      workspace,
+      toolOrigin: "claude",
+      mission: "Ship the CLI lifecycle",
+      approvedTasks: ["Define state schema", "Implement session start"],
+      now: new Date("2026-03-15T12:00:00.000Z"),
+    });
+
+    await expect(
+      requestTimeOverride({
+        workspace,
+        toolOrigin: "claude",
+        now: new Date("2026-03-15T12:30:00.000Z"),
+        reason: "Trying to extend early",
+      }),
+    ).rejects.toMatchObject({
+      refusalReason: "time_override_before_expiry",
+    });
+  });
+
   test("forces Shutdown on expiry and allows exactly one 15-minute time override", async () => {
     const workspace = await createWorkspace();
 

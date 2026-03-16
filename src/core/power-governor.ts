@@ -54,6 +54,7 @@ export type ParkingEntry = {
 
 export type RefusalReason =
   | "timebox_expired"
+  | "time_override_before_expiry"
   | "task_cap_exceeded"
   | "second_post_expiry_override_denied"
   | "out_of_scope_in_converge"
@@ -391,6 +392,7 @@ export async function expireTimebox(input: {
   session.currentModeEnteredAt = input.now.toISOString();
   session.lastTransitionReason = "timebox_expired";
   session.lastUpdatedAt = input.now.toISOString();
+  session.expiresAt = input.now.toISOString();
 
   await saveSessionState(input.workspace, session);
   await appendEvent(
@@ -419,6 +421,13 @@ export async function requestTimeOverride(input: {
 
   if (!session) {
     throw new PowerGovernorError("No active session", "no_active_session");
+  }
+
+  if (session.mode !== "Shutdown" || input.now.getTime() < new Date(session.expiresAt).getTime()) {
+    throw new PowerGovernorError(
+      "Time override is only allowed after the active session has expired",
+      "time_override_before_expiry",
+    );
   }
 
   if (session.remainingExtensionCount <= 0) {

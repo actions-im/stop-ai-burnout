@@ -1,13 +1,15 @@
 import { execFile } from "node:child_process";
 import { mkdtemp, rm } from "node:fs/promises";
 import { promisify } from "node:util";
+import { fileURLToPath } from "node:url";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join, resolve } from "node:path";
 
 import { afterEach, describe, expect, test } from "vitest";
 
 const execFileAsync = promisify(execFile);
 const tempDirs: string[] = [];
+const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
 
 async function createWorkspace() {
   const workspace = await mkdtemp(join(tmpdir(), "power-governor-cli-"));
@@ -17,7 +19,7 @@ async function createWorkspace() {
 
 async function runCli(workspace: string, args: string[]) {
   return execFileAsync("node_modules/.bin/tsx", ["src/cli.ts", ...args], {
-    cwd: "/Users/sergeyzelvenskiy/stop-ai-burnout",
+    cwd: repoRoot,
     env: {
       ...process.env,
       POWER_WORKSPACE: workspace,
